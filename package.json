@@ -1,0 +1,5 @@
+{
+  "name": "compass-core",
+  "private": true,
+  "workspaces": ["packages/*"]
+}
