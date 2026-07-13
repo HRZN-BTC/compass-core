@@ -9,7 +9,7 @@ app and compare.
 
 | Host | When it fires | What is sent | What comes back |
 |------|---------------|--------------|-----------------|
-| `mempool.space` | Only if you use xpub tracking, when a balance refresh runs | Individual derived **addresses** (`/api/address/{address}`), queried in small batches | Confirmed + unconfirmed balance per address |
+| `mempool.space` (default — configurable, see below) | Only if you use xpub tracking, when a balance refresh runs | Individual derived **addresses** (`/api/address/{address}`), queried in small batches | Confirmed + unconfirmed balance per address |
 | `mempool.space` | Price fallback, only if CoinGecko is unreachable | Nothing but the request (`/api/v1/prices`) | Current BTC price |
 | `api.coingecko.com` | Periodically while the app is open | Nothing but the request (one call covers BTC price + all 8 fiat FX rates) | BTC price and FX rates |
 | `compassbtc.app` | On license activation, purchase, and a silent re-verification roughly every 25 days | License key, a random per-install device ID, platform name. During purchase only: your email (to send the license key) | A signed license certificate |
@@ -29,8 +29,12 @@ app and compare.
 - **mempool.space sees your addresses and your IP.** That's inherent to querying
   any public block explorer. Addresses are sent individually (never the xpub, so
   no single request links your whole wallet), but a block explorer could
-  correlate by IP and timing. If that's in your threat model: use a VPN or Tor,
+  correlate by IP and timing. If that's in your threat model you have two outs:
+  point Compass at **your own node** (Settings → Bitcoin Data Source accepts any
+  Esplora/mempool-compatible API; see
+  [`setMempoolEndpoint` in `walletDerived.ts`](./packages/core/src/walletDerived.ts)),
   or use manual balance mode — which makes zero wallet-related network calls at all.
+  A VPN or Tor also helps if you stay on the public explorer.
 - **Manual mode is fully offline-capable.** Enter your balance by hand and the
   only calls left are price, update check, and the ~25-day license ping (which
   has a 30-day offline grace period).
