@@ -22,6 +22,11 @@ These packages contain the security-critical logic: xpub address derivation, wal
 - **`local.ts`** — localStorage provider (browser dev/testing).
 - **`index.ts`** — Provider factory.
 
+## Verify the claims
+
+- **[NETWORK.md](./NETWORK.md)** — every network call the app makes, what's sent, and how to verify it yourself with a packet sniffer.
+- **[SECURITY.md](./SECURITY.md)** — threat model: what Compass can't do, what we could theoretically do, and what happens to you if we disappear.
+
 ## Why open source just these?
 
 The privacy question with a financial app is specific: *does my xpub leave my device, and is my data actually encrypted?* Both answers live here. The app layer (UI, billing, sync) stays proprietary — but the code that touches your keys and your data is here for anyone to audit.
