@@ -31,6 +31,10 @@ These packages contain the security-critical logic: xpub address derivation, wal
 
 The privacy question with a financial app is specific: *does my xpub leave my device, and is my data actually encrypted?* Both answers live here. The app layer (UI, billing, sync) stays proprietary — but the code that touches your keys and your data is here for anyone to audit.
 
+## Related repos
+
+- **[Compass](https://github.com/HRZN-BTC/Compass)** — what Compass is, features, screenshots, and where to download it
+
 ## License
 
 MIT — see [LICENSE](./LICENSE).
