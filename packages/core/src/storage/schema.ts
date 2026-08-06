@@ -7,12 +7,21 @@ export type TxnCategory = 'bitcoin' | 'necessary' | 'discretionary' | 'wasteful'
 export type StoredTxn = {
   id: string // uuidv7
   date: string // YYYY-MM-DD (local)
+  // When the purchase actually happened, when the source reports it (Plaid
+  // authorized_datetime/datetime). Optional so stores written before this
+  // existed keep loading; manual entries and banks that send no time leave it
+  // unset and order within their day by createdAt instead.
+  at?: string | null
   merchant: string
   amountUsd: number
   category: TxnCategory
   icon: string
   note: string | null
-  source: string // manual | csv | wallet | migrated
+  source: string // manual | csv | wallet | migrated | plaid
+  // Set on bank-synced rows (source === 'plaid'). Dedup key for replay-safe
+  // sync; presence makes the row read-only-except-recategorize in clients.
+  plaidTransactionId?: string | null
+  plaidAccountId?: string | null
   btcPriceUsd: number | null // frozen BTC/USD on date; null = unstamped
   createdAt: string // ISO
   updatedAt: string // ISO
@@ -38,6 +47,23 @@ export type StoredAccount = {
   balanceUsd: number
   isLiability: boolean
   sortOrder: number
+  // Set = mirrored from a connected bank (read-only in clients; refreshed each
+  // sync, removed on reconcile/unlink).
+  plaidAccountId?: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+// A connected bank/institution. The access token + sync cursor live server-side
+// (license-scoped relay) — never on the device — so this local row carries only
+// display + status metadata.
+export type StoredPlaidItem = {
+  id: string
+  itemId: string
+  institutionId: string | null
+  institutionName: string | null
+  status: 'active' | 'login_required' | 'removed'
+  lastSyncedAt: string | null
   createdAt: string
   updatedAt: string
 }
@@ -60,26 +86,13 @@ export type StoredSnapshot = {
   priceUsd: number
 }
 
-export type StoredReflection = {
-  id: string
-  year: number
-  month: number // 1-12
-  status: 'building' | 'complete'
-  spendNecessaryUsd: number
-  spendDiscretionaryUsd: number
-  spendWastefulUsd: number
-  totalSpendSats: number
-  accumBtc: number
-  prevAccumBtc: number | null
-  goalImpactDays: number | null
-  updatedAt: string
-}
-
 export type StoredSettings = {
   displayName: string
   defaultUnit: 'btc' | 'usd'
   denomination: 'sats' | 'btc'
   preferredCurrency: string
+  // When on, the net worth hero starts blurred each load (tap to reveal).
+  blurNetWorthOnStart: boolean
   wastefulName: string
   // Esplora/mempool API base for wallet scans; null = mempool.space default.
   btcEndpoint: string | null
@@ -102,6 +115,9 @@ export type StoredSettings = {
   deviceId: string | null
   // First-run trial start (ISO). Set when the user continues without a key.
   trialStartedAt: string | null
+  // Transaction source mode. 'auto' = bank-synced via Plaid (manual entry
+  // paused, except the Bitcoin balance); 'manual' = local-only default.
+  txnMode: 'manual' | 'auto'
   onboardingCompleted: boolean
   onboardingAnswers: Record<string, unknown> | null
   updatedAt: string
@@ -113,12 +129,14 @@ export type CompassData = {
   accounts: StoredAccount[]
   wallet: StoredWallet
   snapshots: StoredSnapshot[]
-  reflections: StoredReflection[]
+  plaidItems: StoredPlaidItem[]
   settings: StoredSettings
   meta: { createdAt: string }
 }
 
-export const STORE_VERSION = 1
+// v2: added plaidItems[], StoredTxn.plaid*, StoredAccount.plaidAccountId,
+// settings.txnMode (all additive; migrateExport backfills older stores).
+export const STORE_VERSION = 2
 
 // Envelope used for the store file, `.compass` backups, and sync payloads.
 export type CompassExport = {
@@ -135,12 +153,13 @@ export function emptyData(now = new Date().toISOString()): CompassData {
     accounts: [],
     wallet: { mode: null, xpub: null, balanceBtc: 0, lastScanAt: null, updatedAt: now },
     snapshots: [],
-    reflections: [],
+    plaidItems: [],
     settings: {
       displayName: '',
       defaultUnit: 'btc',
       denomination: 'sats',
       preferredCurrency: 'USD',
+      blurNetWorthOnStart: false,
       wastefulName: 'Wasteful',
       btcEndpoint: null,
       lastBackupAt: null,
@@ -150,6 +169,7 @@ export function emptyData(now = new Date().toISOString()): CompassData {
       licenseProvider: null,
       deviceId: null,
       trialStartedAt: null,
+      txnMode: 'manual',
       onboardingCompleted: false,
       onboardingAnswers: null,
       updatedAt: now,
@@ -171,8 +191,13 @@ export function migrateExport(raw: unknown): CompassData {
   }
   const data = env.data as CompassData
   // Backfill settings keys added in later versions so an older store gains new
-  // fields (e.g. licenseCert) with their defaults instead of undefined.
+  // fields (e.g. licenseCert, txnMode) with their defaults instead of undefined.
   data.settings = { ...emptyData().settings, ...data.settings }
+  // v2: plaidItems added — older stores/backups have none.
+  if (!Array.isArray(data.plaidItems)) data.plaidItems = []
+  // Reflections were removed from the product. Stores written before that still
+  // carry the array; drop it rather than reject the file, so old backups import.
+  delete (data as { reflections?: unknown }).reflections
   return data
 }
 

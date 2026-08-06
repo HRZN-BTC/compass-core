@@ -10,7 +10,7 @@ import type {
   CompassExport,
   StoredAccount,
   StoredGoal,
-  StoredReflection,
+  StoredPlaidItem,
   StoredSnapshot,
   StoredTxn,
   StoredWallet,
@@ -29,12 +29,41 @@ export type NewStoredTxn = {
   btcPriceUsd?: number | null
 }
 
+// A bank-synced transaction to ingest. source is forced to 'plaid'; the
+// plaidTransactionId is the idempotency key.
+export type NewPlaidTxn = {
+  plaidTransactionId: string
+  plaidAccountId: string
+  date: string
+  merchant: string
+  amountUsd: number
+  category: TxnCategory
+  icon: string
+  at?: string | null // purchase time, when the bank reports one
+  btcPriceUsd?: number | null
+}
+
+// A bank account mirrored onto the net-worth ledger, keyed by plaidAccountId.
+export type NewPlaidAccount = {
+  plaidAccountId: string
+  name: string
+  type: string
+  balanceUsd: number
+  isLiability: boolean
+}
+
 export interface TransactionRepo {
   list(): Promise<StoredTxn[]>
   create(input: NewStoredTxn): Promise<StoredTxn>
   update(id: string, patch: Partial<Omit<StoredTxn, 'id' | 'createdAt' | 'updatedAt'>>): Promise<void>
   remove(id: string): Promise<void>
   bulkUpsert(rows: StoredTxn[]): Promise<number>
+  // Plaid ingest: insert-if-absent keyed on plaidTransactionId so a re-sync
+  // never overwrites a row the user has recategorized. Returns rows added.
+  upsertPlaid(rows: NewPlaidTxn[]): Promise<number>
+  // Bank-owned fields only (date/time/merchant/amount) for a modified Plaid row.
+  updatePlaid(plaidTransactionId: string, patch: { date?: string; at?: string | null; merchant?: string; amountUsd?: number; btcPriceUsd?: number | null }): Promise<void>
+  removeByPlaidTxnIds(plaidTransactionIds: string[]): Promise<number>
 }
 
 export type NewStoredGoal = {
@@ -68,6 +97,12 @@ export interface AccountRepo {
   create(input: NewStoredAccount): Promise<StoredAccount>
   update(id: string, patch: Partial<Omit<StoredAccount, 'id' | 'createdAt' | 'updatedAt'>>): Promise<void>
   remove(id: string): Promise<void>
+  // Mirror bank balances: upsert one row per plaidAccountId (refreshed each
+  // sync). Bank-synced rows render read-only in clients.
+  upsertByPlaidAccountId(rows: NewPlaidAccount[]): Promise<void>
+  // Reconcile: drop mirrored rows whose plaidAccountId is no longer returned
+  // (account closed) or on unlink.
+  removeByPlaidAccountIds(plaidAccountIds: string[]): Promise<number>
 }
 
 export interface WalletRepo {
@@ -80,18 +115,28 @@ export interface WalletRepo {
   clear(): Promise<void>
 }
 
-export interface ReflectionRepo {
-  list(): Promise<StoredReflection[]>
-  upsertMonth(r: Omit<StoredReflection, 'id' | 'updatedAt'>): Promise<void>
-}
-
 export interface SettingsRepo {
   get(): Promise<StoredSettings>
   patch(p: Partial<Omit<StoredSettings, 'updatedAt'>>): Promise<void>
 }
 
+export type NewPlaidItem = {
+  itemId: string
+  institutionId?: string | null
+  institutionName?: string | null
+  status?: 'active' | 'login_required' | 'removed'
+  lastSyncedAt?: string | null
+}
+
+export interface PlaidItemRepo {
+  list(): Promise<StoredPlaidItem[]>
+  // Upsert by itemId (relinking the same bank refreshes status/lastSyncedAt).
+  upsert(input: NewPlaidItem): Promise<StoredPlaidItem>
+  remove(itemId: string): Promise<void>
+}
+
 export type ImportMode = 'replace' | 'merge'
-export type ImportReport = { transactions: number; goals: number; accounts: number; reflections: number }
+export type ImportReport = { transactions: number; goals: number; accounts: number }
 
 export interface StorageProvider {
   readonly kind: 'json-file' | 'local-storage' | 'indexeddb' | 'sqlite' | 'supabase'
@@ -101,7 +146,7 @@ export interface StorageProvider {
   goals: GoalRepo
   accounts: AccountRepo
   wallet: WalletRepo
-  reflections: ReflectionRepo
+  plaidItems: PlaidItemRepo
   settings: SettingsRepo
   exportAll(): Promise<CompassExport>
   importAll(raw: unknown, mode: ImportMode): Promise<ImportReport>

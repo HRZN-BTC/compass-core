@@ -21,7 +21,7 @@ export const SATS_PER_BTC = 1e8
 
 // Last-resort price used until the first fetch resolves (and if every upstream
 // fails). Keep this the ONLY hardcoded BTC price in the codebase.
-export const FALLBACK_BTC_PRICE = 98240
+export const FALLBACK_BTC_PRICE = 64000
 export const FALLBACK_CHANGE_PCT = 0.6
 
 export type FiatPrices = Partial<Record<CurrencyCode, number>>
@@ -82,55 +82,117 @@ export function setBtcPrice(p: { usd?: number; change24h?: number; prices?: Fiat
   }
 }
 
+const VS = CURRENCY_CODES.join(',').toLowerCase()
 const COINGECKO =
-  'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin' +
-  `&vs_currencies=${CURRENCY_CODES.join(',').toLowerCase()}` +
-  '&include_24hr_change=true'
+  `https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=${VS}&include_24hr_change=true`
+const BLOCKCHAIN = 'https://blockchain.info/ticker'
 const MEMPOOL = 'https://mempool.space/api/v1/prices'
+const COINBASE = 'https://api.coinbase.com/v2/prices/BTC-USD/spot'
 
-// Server-side memory of the last successful multi-currency fetch, used to
-// splice INR into the mempool fallback (mempool covers the other seven but not
-// INR). Lost on cold start — FALLBACK_FX covers that.
+// Server-side memory of the last successful multi-currency fetch. Used to splice
+// missing fiats (e.g. INR, which mempool lacks; or every non-USD fiat when the
+// only reachable source is a USD-only exchange) at a slightly stale FX rate
+// scaled to the fresh USD price. Lost on cold start — FALLBACK_FX covers that.
 let lastGoodUpstream: FiatPrices | null = null
 
-// Server-side upstream fetch. The `next.revalidate` caches the upstream call so
-// traffic never hammers CoinGecko regardless of how many requests hit /api/price.
-export async function fetchBtcPriceUpstream(): Promise<BtcPrice> {
-  try {
-    const res = await coreFetch(COINGECKO, { revalidate: 60 })
-    if (!res.ok) throw new Error(`coingecko ${res.status}`)
-    const j = await res.json()
-    const prices: FiatPrices = {}
-    for (const code of CURRENCY_CODES) {
-      const v = Number(j.bitcoin[code.toLowerCase()])
-      if (v > 0) prices[code] = v
-    }
-    if (!prices.USD) throw new Error('coingecko missing usd')
-    lastGoodUpstream = prices
-    return {
-      usd: prices.USD,
-      change24h: Number(j.bitcoin.usd_24h_change ?? 0),
-      fetchedAt: Date.now(),
-      prices,
-    }
-  } catch (err) {
-    const res = await coreFetch(MEMPOOL, { revalidate: 60 })
-    if (!res.ok) throw err
-    const j = await res.json()
-    const usd = Number(j.USD)
-    const prices: FiatPrices = {}
-    for (const code of CURRENCY_CODES) {
-      const v = Number(j[code])
-      if (v > 0) prices[code] = v
-    }
-    // mempool has no INR: carry the FX rate from the last good CoinGecko fetch
-    // (scaled to the fresh USD price) so INR users degrade to a slightly stale
-    // rate instead of snapping to the seed.
-    if (!prices.INR && lastGoodUpstream?.INR && lastGoodUpstream.USD) {
-      prices.INR = usd * (lastGoodUpstream.INR / lastGoodUpstream.USD)
-    }
-    return { usd, change24h: 0, fetchedAt: Date.now(), prices }
+// Ordered chain of free, keyless BTC price sources. Each returns a normalized
+// BtcPrice or throws; fetchBtcPriceUpstream() walks the chain and takes the
+// first that yields a positive USD. Ordering = best data first:
+//   1. CoinGecko    — all 8 fiats + real 24h change (but rate-limits hard).
+//   2. blockchain.info — all 8 fiats incl INR, no 24h change.
+//   3. mempool.space   — 7 fiats (no INR), no 24h change.
+//   4. Coinbase        — USD only; ultra-reliable last resort.
+// Sources 3–4 rely on spliceMissingFiats() to backfill absent currencies.
+
+async function fromCoinGecko(): Promise<BtcPrice> {
+  const res = await coreFetch(COINGECKO, { revalidate: 60 })
+  if (!res.ok) throw new Error(`coingecko ${res.status}`)
+  const j = await res.json()
+  const prices: FiatPrices = {}
+  for (const code of CURRENCY_CODES) {
+    const v = Number(j.bitcoin[code.toLowerCase()])
+    if (v > 0) prices[code] = v
   }
+  if (!prices.USD) throw new Error('coingecko missing usd')
+  return { usd: prices.USD, change24h: Number(j.bitcoin.usd_24h_change ?? 0), fetchedAt: Date.now(), prices }
+}
+
+async function fromBlockchainInfo(): Promise<BtcPrice> {
+  const res = await coreFetch(BLOCKCHAIN, { revalidate: 60 })
+  if (!res.ok) throw new Error(`blockchain.info ${res.status}`)
+  const j = await res.json()
+  const prices: FiatPrices = {}
+  for (const code of CURRENCY_CODES) {
+    const v = Number(j[code]?.last)
+    if (v > 0) prices[code] = v
+  }
+  if (!prices.USD) throw new Error('blockchain.info missing usd')
+  return { usd: prices.USD, change24h: 0, fetchedAt: Date.now(), prices }
+}
+
+async function fromMempool(): Promise<BtcPrice> {
+  const res = await coreFetch(MEMPOOL, { revalidate: 60 })
+  if (!res.ok) throw new Error(`mempool ${res.status}`)
+  const j = await res.json()
+  const usd = Number(j.USD)
+  if (!(usd > 0)) throw new Error('mempool missing usd')
+  const prices: FiatPrices = {}
+  for (const code of CURRENCY_CODES) {
+    const v = Number(j[code])
+    if (v > 0) prices[code] = v
+  }
+  return { usd, change24h: 0, fetchedAt: Date.now(), prices }
+}
+
+async function fromCoinbase(): Promise<BtcPrice> {
+  const res = await coreFetch(COINBASE, { revalidate: 60 })
+  if (!res.ok) throw new Error(`coinbase ${res.status}`)
+  const j = await res.json()
+  const usd = Number(j?.data?.amount)
+  if (!(usd > 0)) throw new Error('coinbase missing usd')
+  return { usd, change24h: 0, fetchedAt: Date.now(), prices: { USD: usd } }
+}
+
+const SOURCES: Array<() => Promise<BtcPrice>> = [
+  fromCoinGecko,
+  fromBlockchainInfo,
+  fromMempool,
+  fromCoinbase,
+]
+
+// Backfill any fiat a partial source didn't provide, using the last good
+// multi-currency fetch's FX ratio scaled to this fetch's fresh USD price. Keeps
+// INR (and, for USD-only sources, every other fiat) at a slightly stale rate
+// instead of snapping to the build-time seed.
+function spliceMissingFiats(p: BtcPrice): BtcPrice {
+  if (!lastGoodUpstream?.USD) return p
+  const prices: FiatPrices = { ...p.prices }
+  for (const code of CURRENCY_CODES) {
+    const cached = lastGoodUpstream[code]
+    if (!prices[code] && cached) prices[code] = p.usd * (cached / lastGoodUpstream.USD)
+  }
+  return { ...p, prices }
+}
+
+// Server-side upstream fetch. Each source's `next.revalidate` caches its call so
+// traffic never hammers any one provider regardless of how many requests hit
+// /api/price. Walks the source chain; first positive USD wins.
+export async function fetchBtcPriceUpstream(): Promise<BtcPrice> {
+  let lastErr: unknown
+  for (const source of SOURCES) {
+    try {
+      const p = await source()
+      if (!(p.usd > 0)) continue
+      // Remember a full multi-fiat fetch so USD-only fallbacks can be spliced.
+      if (p.prices && p.prices.USD && Object.keys(p.prices).length >= CURRENCY_CODES.length) {
+        lastGoodUpstream = p.prices
+      }
+      return spliceMissingFiats(p)
+    } catch (err) {
+      lastErr = err
+    }
+  }
+  throw lastErr ?? new Error('all btc price sources failed')
 }
 
 // Client-side: read our cached /api/price and update the module live value.

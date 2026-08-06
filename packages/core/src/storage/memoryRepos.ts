@@ -4,10 +4,13 @@
 // lives here exactly once. A future SQLite provider replaces this wholesale.
 
 import { uuidv7 } from '../id'
-import { emptyData, migrateExport, toExport, type CompassData, type StoredReflection, type StoredTxn } from './schema'
+import { emptyData, migrateExport, toExport, type CompassData, type StoredPlaidItem, type StoredTxn } from './schema'
 import type {
   ImportMode,
   ImportReport,
+  NewPlaidAccount,
+  NewPlaidItem,
+  NewPlaidTxn,
   NewStoredAccount,
   NewStoredGoal,
   NewStoredTxn,
@@ -94,6 +97,56 @@ export function buildProvider(opts: {
         save()
         return rows.length
       },
+      async upsertPlaid(rows: NewPlaidTxn[]) {
+        const seen = new Set(
+          data.transactions.map((t) => t.plaidTransactionId).filter((x): x is string => !!x),
+        )
+        let added = 0
+        for (const r of rows) {
+          if (seen.has(r.plaidTransactionId)) continue // insert-if-absent: never clobber a recategorized row
+          data.transactions.push({
+            id: uuidv7(),
+            date: r.date,
+            at: r.at ?? null,
+            merchant: r.merchant,
+            amountUsd: r.amountUsd,
+            category: r.category,
+            icon: r.icon,
+            note: null,
+            source: 'plaid',
+            plaidTransactionId: r.plaidTransactionId,
+            plaidAccountId: r.plaidAccountId,
+            btcPriceUsd: r.btcPriceUsd ?? null,
+            createdAt: nowIso(),
+            updatedAt: nowIso(),
+          })
+          seen.add(r.plaidTransactionId)
+          added++
+        }
+        if (added) save()
+        return added
+      },
+      async updatePlaid(plaidTransactionId, patch) {
+        const t = data.transactions.find((x) => x.plaidTransactionId === plaidTransactionId)
+        if (!t) return
+        if (patch.date !== undefined) t.date = patch.date
+        if (patch.at !== undefined) t.at = patch.at
+        if (patch.merchant !== undefined) t.merchant = patch.merchant
+        if (patch.amountUsd !== undefined) t.amountUsd = patch.amountUsd
+        if (patch.btcPriceUsd !== undefined) t.btcPriceUsd = patch.btcPriceUsd
+        t.updatedAt = nowIso()
+        save()
+      },
+      async removeByPlaidTxnIds(ids) {
+        const set = new Set(ids)
+        const before = data.transactions.length
+        data.transactions = data.transactions.filter(
+          (t) => !(t.plaidTransactionId && set.has(t.plaidTransactionId)),
+        )
+        const removed = before - data.transactions.length
+        if (removed) save()
+        return removed
+      },
     },
 
     goals: {
@@ -174,6 +227,39 @@ export function buildProvider(opts: {
         data.accounts = data.accounts.filter((a) => a.id !== id)
         save()
       },
+      async upsertByPlaidAccountId(rows: NewPlaidAccount[]) {
+        for (const r of rows) {
+          const ex = data.accounts.find((a) => a.plaidAccountId === r.plaidAccountId)
+          if (ex) {
+            ex.name = r.name
+            ex.type = r.type
+            ex.balanceUsd = r.balanceUsd
+            ex.isLiability = r.isLiability
+            ex.updatedAt = nowIso()
+          } else {
+            data.accounts.push({
+              id: uuidv7(),
+              name: r.name,
+              type: r.type,
+              balanceUsd: r.balanceUsd,
+              isLiability: r.isLiability,
+              sortOrder: data.accounts.length,
+              plaidAccountId: r.plaidAccountId,
+              createdAt: nowIso(),
+              updatedAt: nowIso(),
+            })
+          }
+        }
+        save()
+      },
+      async removeByPlaidAccountIds(ids) {
+        const set = new Set(ids)
+        const before = data.accounts.length
+        data.accounts = data.accounts.filter((a) => !(a.plaidAccountId && set.has(a.plaidAccountId)))
+        const removed = before - data.accounts.length
+        if (removed) save()
+        return removed
+      },
     },
 
     wallet: {
@@ -207,17 +293,37 @@ export function buildProvider(opts: {
       },
     },
 
-    reflections: {
+    plaidItems: {
       async list() {
-        return [...data.reflections]
+        return [...data.plaidItems]
       },
-      async upsertMonth(r) {
-        const existing = data.reflections.find((x) => x.year === r.year && x.month === r.month)
-        if (existing) {
-          Object.assign(existing, r, { updatedAt: nowIso() })
-        } else {
-          data.reflections.push({ id: uuidv7(), ...r, updatedAt: nowIso() } as StoredReflection)
+      async upsert(input: NewPlaidItem) {
+        const ex = data.plaidItems.find((i) => i.itemId === input.itemId)
+        if (ex) {
+          if (input.institutionId !== undefined) ex.institutionId = input.institutionId ?? null
+          if (input.institutionName !== undefined) ex.institutionName = input.institutionName ?? null
+          if (input.status !== undefined) ex.status = input.status
+          if (input.lastSyncedAt !== undefined) ex.lastSyncedAt = input.lastSyncedAt ?? null
+          ex.updatedAt = nowIso()
+          save()
+          return { ...ex }
         }
+        const item: StoredPlaidItem = {
+          id: uuidv7(),
+          itemId: input.itemId,
+          institutionId: input.institutionId ?? null,
+          institutionName: input.institutionName ?? null,
+          status: input.status ?? 'active',
+          lastSyncedAt: input.lastSyncedAt ?? null,
+          createdAt: nowIso(),
+          updatedAt: nowIso(),
+        }
+        data.plaidItems.push(item)
+        save()
+        return { ...item }
+      },
+      async remove(itemId) {
+        data.plaidItems = data.plaidItems.filter((i) => i.itemId !== itemId)
         save()
       },
     },
@@ -244,7 +350,7 @@ export function buildProvider(opts: {
         data.transactions = mergeRows(data.transactions, incoming.transactions)
         data.goals = mergeRows(data.goals, incoming.goals)
         data.accounts = mergeRows(data.accounts, incoming.accounts)
-        data.reflections = mergeRows(data.reflections, incoming.reflections)
+        data.plaidItems = mergeRows(data.plaidItems, incoming.plaidItems)
         if (incoming.wallet.updatedAt > data.wallet.updatedAt) data.wallet = incoming.wallet
         if (incoming.settings.updatedAt > data.settings.updatedAt) data.settings = incoming.settings
         const seen = new Set(data.snapshots.map((s) => s.id))
@@ -255,7 +361,6 @@ export function buildProvider(opts: {
         transactions: incoming.transactions.length,
         goals: incoming.goals.length,
         accounts: incoming.accounts.length,
-        reflections: incoming.reflections.length,
       }
     },
 
