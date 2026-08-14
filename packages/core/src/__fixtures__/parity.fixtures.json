@@ -1,0 +1,364 @@
+{
+  "_meta": {
+    "version": 1,
+    "purpose": "Cross-repo parity. Compass-Mobile-App/src/lib/costBasis.ts and compass-web-app/packages/core/src/costBasis.ts must agree to the cent. Both repos hold an identical copy of this file and run their own implementation against it.",
+    "generatedFrom": "Compass-Mobile-App/src/lib/costBasis.ts"
+  },
+  "currencyCodes": [
+    "USD",
+    "CAD",
+    "AUD",
+    "EUR",
+    "GBP",
+    "INR",
+    "JPY",
+    "CHF"
+  ],
+  "cases": [
+    {
+      "name": "single stamped buy",
+      "livePriceUsd": 100000,
+      "rows": [
+        {
+          "id": "t1",
+          "usd": 100,
+          "priceUsd": 50000,
+          "date": "2026-01-15",
+          "merchant": "Strike"
+        }
+      ],
+      "expected": {
+        "costBasis": {
+          "buyCount": 1,
+          "totalUsd": 100,
+          "totalSats": 200000,
+          "totalBtc": 0.002,
+          "avgPriceUsd": 50000,
+          "currentValueUsd": 200,
+          "unrealizedUsd": 100,
+          "unrealizedPct": 100,
+          "firstBuyIso": "2026-01-15"
+        },
+        "buyPoints": [
+          {
+            "id": "t1",
+            "t": 1768435200000,
+            "usd": 100,
+            "priceUsd": 50000,
+            "sats": 200000,
+            "cumSats": 200000,
+            "iso": "2026-01-15",
+            "merchant": "Strike"
+          }
+        ]
+      }
+    },
+    {
+      "name": "mixed prices are summed per row, never repriced as an aggregate",
+      "livePriceUsd": 64000,
+      "rows": [
+        {
+          "id": "t1",
+          "usd": 100,
+          "priceUsd": 50000,
+          "date": "2026-01-15",
+          "merchant": "Strike"
+        },
+        {
+          "id": "t2",
+          "usd": 100,
+          "priceUsd": 100000,
+          "date": "2026-02-15",
+          "merchant": "River"
+        }
+      ],
+      "expected": {
+        "costBasis": {
+          "buyCount": 2,
+          "totalUsd": 200,
+          "totalSats": 300000,
+          "totalBtc": 0.003,
+          "avgPriceUsd": 66666.66666666667,
+          "currentValueUsd": 192,
+          "unrealizedUsd": -8,
+          "unrealizedPct": -4,
+          "firstBuyIso": "2026-01-15"
+        },
+        "buyPoints": [
+          {
+            "id": "t1",
+            "t": 1768435200000,
+            "usd": 100,
+            "priceUsd": 50000,
+            "sats": 200000,
+            "cumSats": 200000,
+            "iso": "2026-01-15",
+            "merchant": "Strike"
+          },
+          {
+            "id": "t2",
+            "t": 1771113600000,
+            "usd": 100,
+            "priceUsd": 100000,
+            "sats": 100000,
+            "cumSats": 300000,
+            "iso": "2026-02-15",
+            "merchant": "River"
+          }
+        ]
+      }
+    },
+    {
+      "name": "unstamped buy counts toward the stack but is not plottable",
+      "livePriceUsd": 50000,
+      "rows": [
+        {
+          "id": "t1",
+          "usd": 100,
+          "priceUsd": null,
+          "date": "2026-01-01",
+          "merchant": "Cash App"
+        },
+        {
+          "id": "t2",
+          "usd": 100,
+          "priceUsd": 50000,
+          "date": "2026-01-02",
+          "merchant": "Strike"
+        }
+      ],
+      "expected": {
+        "costBasis": {
+          "buyCount": 2,
+          "totalUsd": 200,
+          "totalSats": 400000,
+          "totalBtc": 0.004,
+          "avgPriceUsd": 50000,
+          "currentValueUsd": 200,
+          "unrealizedUsd": 0,
+          "unrealizedPct": 0,
+          "firstBuyIso": "2026-01-01"
+        },
+        "buyPoints": [
+          {
+            "id": "t2",
+            "t": 1767312000000,
+            "usd": 100,
+            "priceUsd": 50000,
+            "sats": 200000,
+            "cumSats": 400000,
+            "iso": "2026-01-02",
+            "merchant": "Strike"
+          }
+        ]
+      }
+    },
+    {
+      "name": "no resolvable price reports unknown, not a total loss",
+      "livePriceUsd": 0,
+      "rows": [
+        {
+          "id": "t1",
+          "usd": 100,
+          "priceUsd": null,
+          "date": "2026-01-15",
+          "merchant": "Strike"
+        }
+      ],
+      "expected": {
+        "costBasis": {
+          "buyCount": 1,
+          "totalUsd": 100,
+          "totalSats": 0,
+          "totalBtc": 0,
+          "avgPriceUsd": null,
+          "currentValueUsd": 0,
+          "unrealizedUsd": 0,
+          "unrealizedPct": null,
+          "firstBuyIso": "2026-01-15"
+        },
+        "buyPoints": []
+      }
+    },
+    {
+      "name": "no buys at all",
+      "livePriceUsd": 64000,
+      "rows": [],
+      "expected": {
+        "costBasis": {
+          "buyCount": 0,
+          "totalUsd": 0,
+          "totalSats": 0,
+          "totalBtc": 0,
+          "avgPriceUsd": null,
+          "currentValueUsd": 0,
+          "unrealizedUsd": 0,
+          "unrealizedPct": null,
+          "firstBuyIso": null
+        },
+        "buyPoints": []
+      }
+    },
+    {
+      "name": "awkward amounts exercise per-row rounding",
+      "livePriceUsd": 64000,
+      "rows": [
+        {
+          "id": "t1",
+          "usd": 33.33,
+          "priceUsd": 51234,
+          "date": "2026-08-01",
+          "merchant": "Strike"
+        },
+        {
+          "id": "t2",
+          "usd": 7.77,
+          "priceUsd": 63991,
+          "date": "2026-08-02",
+          "merchant": "River"
+        },
+        {
+          "id": "t3",
+          "usd": 250,
+          "priceUsd": 48003,
+          "date": "2026-08-03",
+          "merchant": "Swan"
+        },
+        {
+          "id": "t4",
+          "usd": 1.01,
+          "priceUsd": 70000,
+          "date": "2026-08-04",
+          "merchant": "Strike"
+        }
+      ],
+      "expected": {
+        "costBasis": {
+          "buyCount": 4,
+          "totalUsd": 292.11,
+          "totalSats": 599440,
+          "totalBtc": 0.0059944,
+          "avgPriceUsd": 48730.48178299746,
+          "currentValueUsd": 383.64160000000004,
+          "unrealizedUsd": 91.53160000000003,
+          "unrealizedPct": 31.334634213138894,
+          "firstBuyIso": "2026-08-01"
+        },
+        "buyPoints": [
+          {
+            "id": "t1",
+            "t": 1785542400000,
+            "usd": 33.33,
+            "priceUsd": 51234,
+            "sats": 65054,
+            "cumSats": 65054,
+            "iso": "2026-08-01",
+            "merchant": "Strike"
+          },
+          {
+            "id": "t2",
+            "t": 1785628800000,
+            "usd": 7.77,
+            "priceUsd": 63991,
+            "sats": 12142,
+            "cumSats": 77196,
+            "iso": "2026-08-02",
+            "merchant": "River"
+          },
+          {
+            "id": "t3",
+            "t": 1785715200000,
+            "usd": 250,
+            "priceUsd": 48003,
+            "sats": 520801,
+            "cumSats": 597997,
+            "iso": "2026-08-03",
+            "merchant": "Swan"
+          },
+          {
+            "id": "t4",
+            "t": 1785801600000,
+            "usd": 1.01,
+            "priceUsd": 70000,
+            "sats": 1443,
+            "cumSats": 599440,
+            "iso": "2026-08-04",
+            "merchant": "Strike"
+          }
+        ]
+      }
+    },
+    {
+      "name": "out of order input sorts ascending",
+      "livePriceUsd": 64000,
+      "rows": [
+        {
+          "id": "t3",
+          "usd": 300,
+          "priceUsd": 60000,
+          "date": "2026-03-01",
+          "merchant": "Swan"
+        },
+        {
+          "id": "t1",
+          "usd": 100,
+          "priceUsd": 40000,
+          "date": "2026-01-01",
+          "merchant": "Strike"
+        },
+        {
+          "id": "t2",
+          "usd": 200,
+          "priceUsd": 50000,
+          "date": "2026-02-01",
+          "merchant": "River"
+        }
+      ],
+      "expected": {
+        "costBasis": {
+          "buyCount": 3,
+          "totalUsd": 600,
+          "totalSats": 1150000,
+          "totalBtc": 0.0115,
+          "avgPriceUsd": 52173.913043478264,
+          "currentValueUsd": 736,
+          "unrealizedUsd": 136,
+          "unrealizedPct": 22.666666666666664,
+          "firstBuyIso": "2026-01-01"
+        },
+        "buyPoints": [
+          {
+            "id": "t1",
+            "t": 1767225600000,
+            "usd": 100,
+            "priceUsd": 40000,
+            "sats": 250000,
+            "cumSats": 250000,
+            "iso": "2026-01-01",
+            "merchant": "Strike"
+          },
+          {
+            "id": "t2",
+            "t": 1769904000000,
+            "usd": 200,
+            "priceUsd": 50000,
+            "sats": 400000,
+            "cumSats": 650000,
+            "iso": "2026-02-01",
+            "merchant": "River"
+          },
+          {
+            "id": "t3",
+            "t": 1772323200000,
+            "usd": 300,
+            "priceUsd": 60000,
+            "sats": 500000,
+            "cumSats": 1150000,
+            "iso": "2026-03-01",
+            "merchant": "Swan"
+          }
+        ]
+      }
+    }
+  ]
+}
