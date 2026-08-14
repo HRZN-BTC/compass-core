@@ -68,6 +68,30 @@ export type StoredPlaidItem = {
   updatedAt: string
 }
 
+// A locally generated notification.
+//
+// Desktop has no Supabase account (identity is a license key by email), so the
+// server-side producers that write public.notifications for mobile and web have
+// no user to write for. The desktop app evaluates the same conditions against
+// its own encrypted store instead — same shape on screen, no network.
+//
+// dedupeKey mirrors the notifications_dedupe unique index on the server: the
+// generator runs on every app open and after every sync, so "already told them
+// this" has to be cheap and exact.
+export type StoredNotification = {
+  id: string
+  type: string
+  title: string
+  subtitle: string | null
+  icon: string
+  // Canonical destination key ('spending' | 'goals' | 'bitcoin' | 'banks'),
+  // not a route — the same vocabulary the server-side producers write.
+  deepLink: string | null
+  read: boolean
+  dedupeKey: string | null
+  createdAt: string
+}
+
 export type StoredWallet = {
   // 'xpub' = watch-only wallet scanned on-device; 'manual' = user-entered balance.
   mode: 'xpub' | 'manual' | null
@@ -115,6 +139,13 @@ export type StoredSettings = {
   deviceId: string | null
   // First-run trial start (ISO). Set when the user continues without a key.
   trialStartedAt: string | null
+  // First run of the local notification generator (ISO), or null.
+  //
+  // Goal milestones are evaluated from current state rather than from a
+  // crossing, so without this an existing store would announce every threshold
+  // it had already passed the first time the feature ships. The first run
+  // records this and stays quiet; later runs report real progress.
+  notificationsInitializedAt: string | null
   // Transaction source mode. 'auto' = bank-synced via Plaid (manual entry
   // paused, except the Bitcoin balance); 'manual' = local-only default.
   txnMode: 'manual' | 'auto'
@@ -130,13 +161,16 @@ export type CompassData = {
   wallet: StoredWallet
   snapshots: StoredSnapshot[]
   plaidItems: StoredPlaidItem[]
+  notifications: StoredNotification[]
   settings: StoredSettings
   meta: { createdAt: string }
 }
 
 // v2: added plaidItems[], StoredTxn.plaid*, StoredAccount.plaidAccountId,
-// settings.txnMode (all additive; migrateExport backfills older stores).
-export const STORE_VERSION = 2
+// settings.txnMode.
+// v3: added notifications[].
+// All additive; migrateExport backfills older stores.
+export const STORE_VERSION = 3
 
 // Envelope used for the store file, `.compass` backups, and sync payloads.
 export type CompassExport = {
@@ -154,6 +188,7 @@ export function emptyData(now = new Date().toISOString()): CompassData {
     wallet: { mode: null, xpub: null, balanceBtc: 0, lastScanAt: null, updatedAt: now },
     snapshots: [],
     plaidItems: [],
+    notifications: [],
     settings: {
       displayName: '',
       defaultUnit: 'btc',
@@ -166,6 +201,7 @@ export function emptyData(now = new Date().toISOString()): CompassData {
       licenseKey: null,
       licenseCert: null,
       licenseCheckedAt: null,
+      notificationsInitializedAt: null,
       licenseProvider: null,
       deviceId: null,
       trialStartedAt: null,
@@ -195,6 +231,9 @@ export function migrateExport(raw: unknown): CompassData {
   data.settings = { ...emptyData().settings, ...data.settings }
   // v2: plaidItems added — older stores/backups have none.
   if (!Array.isArray(data.plaidItems)) data.plaidItems = []
+  // v3: notifications added. Left empty rather than back-generated — telling
+  // someone about a budget they blew three months ago helps nobody.
+  if (!Array.isArray(data.notifications)) data.notifications = []
   // Reflections were removed from the product. Stores written before that still
   // carry the array; drop it rather than reject the file, so old backups import.
   delete (data as { reflections?: unknown }).reflections

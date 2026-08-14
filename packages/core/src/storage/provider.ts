@@ -10,6 +10,7 @@ import type {
   CompassExport,
   StoredAccount,
   StoredGoal,
+  StoredNotification,
   StoredPlaidItem,
   StoredSnapshot,
   StoredTxn,
@@ -135,6 +136,33 @@ export interface PlaidItemRepo {
   remove(itemId: string): Promise<void>
 }
 
+export type NewStoredNotification = {
+  type: string
+  title: string
+  subtitle?: string | null
+  icon?: string
+  deepLink?: string | null
+  dedupeKey?: string | null
+}
+
+export interface NotificationRepo {
+  /** Newest first. */
+  list(): Promise<StoredNotification[]>
+  /**
+   * Insert unless a row with the same dedupeKey already exists.
+   * Returns true if a row was written.
+   *
+   * The desktop generator re-evaluates every condition on each app open, so
+   * "already said this" is the common case, not the exception. Mirrors the
+   * notifications_dedupe unique index the server-side producers rely on.
+   */
+  add(input: NewStoredNotification): Promise<boolean>
+  markRead(id: string): Promise<void>
+  markAllRead(): Promise<void>
+  /** Trim to the newest `keep` rows. The feed shows 50; the store needn't grow forever. */
+  prune(keep: number): Promise<void>
+}
+
 export type ImportMode = 'replace' | 'merge'
 export type ImportReport = { transactions: number; goals: number; accounts: number }
 
@@ -147,6 +175,7 @@ export interface StorageProvider {
   accounts: AccountRepo
   wallet: WalletRepo
   plaidItems: PlaidItemRepo
+  notifications: NotificationRepo
   settings: SettingsRepo
   exportAll(): Promise<CompassExport>
   importAll(raw: unknown, mode: ImportMode): Promise<ImportReport>

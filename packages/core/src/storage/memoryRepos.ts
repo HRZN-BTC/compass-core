@@ -13,6 +13,7 @@ import type {
   NewPlaidTxn,
   NewStoredAccount,
   NewStoredGoal,
+  NewStoredNotification,
   NewStoredTxn,
   StorageProvider,
 } from './provider'
@@ -328,6 +329,53 @@ export function buildProvider(opts: {
       },
     },
 
+    notifications: {
+      async list() {
+        return [...data.notifications].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
+      },
+      async add(input: NewStoredNotification) {
+        if (input.dedupeKey && data.notifications.some((n) => n.dedupeKey === input.dedupeKey)) {
+          return false
+        }
+        data.notifications.push({
+          id: uuidv7(),
+          type: input.type,
+          title: input.title,
+          subtitle: input.subtitle ?? null,
+          icon: input.icon ?? 'list',
+          deepLink: input.deepLink ?? null,
+          read: false,
+          dedupeKey: input.dedupeKey ?? null,
+          createdAt: nowIso(),
+        })
+        save()
+        return true
+      },
+      async markRead(id) {
+        const n = data.notifications.find((x) => x.id === id)
+        if (!n || n.read) return
+        n.read = true
+        save()
+      },
+      async markAllRead() {
+        let changed = false
+        for (const n of data.notifications) {
+          if (!n.read) {
+            n.read = true
+            changed = true
+          }
+        }
+        if (changed) save()
+      },
+      async prune(keep) {
+        if (data.notifications.length <= keep) return
+        data.notifications = [...data.notifications]
+          .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
+          .slice(0, keep)
+        save()
+      },
+    },
+
     settings: {
       async get() {
         return { ...data.settings }
@@ -351,6 +399,17 @@ export function buildProvider(opts: {
         data.goals = mergeRows(data.goals, incoming.goals)
         data.accounts = mergeRows(data.accounts, incoming.accounts)
         data.plaidItems = mergeRows(data.plaidItems, incoming.plaidItems)
+        // Notifications carry no updatedAt, so mergeRows doesn't apply — union
+        // on id and drop anything that duplicates a dedupeKey already held.
+        {
+          const ids = new Set(data.notifications.map((n) => n.id))
+          const keys = new Set(data.notifications.map((n) => n.dedupeKey).filter(Boolean))
+          for (const n of incoming.notifications ?? []) {
+            if (ids.has(n.id)) continue
+            if (n.dedupeKey && keys.has(n.dedupeKey)) continue
+            data.notifications.push(n)
+          }
+        }
         if (incoming.wallet.updatedAt > data.wallet.updatedAt) data.wallet = incoming.wallet
         if (incoming.settings.updatedAt > data.settings.updatedAt) data.settings = incoming.settings
         const seen = new Set(data.snapshots.map((s) => s.id))
