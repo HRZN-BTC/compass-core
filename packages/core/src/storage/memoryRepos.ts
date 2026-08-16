@@ -5,6 +5,10 @@
 
 import { uuidv7 } from '../id'
 import { emptyData, migrateExport, toExport, type CompassData, type StoredPlaidItem, type StoredTxn } from './schema'
+
+// Upper bound on remembered cleared-notification keys. Generously above the
+// ~100 rows the feed itself keeps, because a tombstone outlives its row.
+const TOMBSTONE_CAP = 500
 import type {
   ImportMode,
   ImportReport,
@@ -337,6 +341,12 @@ export function buildProvider(opts: {
         if (input.dedupeKey && data.notifications.some((n) => n.dedupeKey === input.dedupeKey)) {
           return false
         }
+        // A cleared key stays suppressed. Without this the generator would put
+        // back everything still true on the next app open, and Clear all would
+        // look broken.
+        if (input.dedupeKey && data.notificationTombstones.includes(input.dedupeKey)) {
+          return false
+        }
         data.notifications.push({
           id: uuidv7(),
           type: input.type,
@@ -367,8 +377,25 @@ export function buildProvider(opts: {
         }
         if (changed) save()
       },
+      async clearAll() {
+        if (data.notifications.length === 0) return
+        const keys = data.notifications.map((n) => n.dedupeKey).filter((k): k is string => !!k)
+        data.notificationTombstones = [...new Set([...data.notificationTombstones, ...keys])]
+        data.notifications = []
+        save()
+      },
       async prune(keep) {
-        if (data.notifications.length <= keep) return
+        // Tombstones are capped independently of `keep`: they are one short
+        // string each, and dropping one early would let its notification
+        // reappear. Generated keys are scoped to a day or an ISO week, so an
+        // old one can never match again — the cap only bounds the file.
+        if (data.notificationTombstones.length > TOMBSTONE_CAP) {
+          data.notificationTombstones = data.notificationTombstones.slice(-TOMBSTONE_CAP)
+        }
+        if (data.notifications.length <= keep) {
+          save()
+          return
+        }
         data.notifications = [...data.notifications]
           .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
           .slice(0, keep)

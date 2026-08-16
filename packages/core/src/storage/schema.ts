@@ -162,6 +162,11 @@ export type CompassData = {
   snapshots: StoredSnapshot[]
   plaidItems: StoredPlaidItem[]
   notifications: StoredNotification[]
+  // Dedupe keys of notifications the user cleared. The generator re-evaluates
+  // every condition on each app open and dedupes against existing rows, so
+  // without these a cleared feed would refill itself with anything still true.
+  // prune() drops a tombstone once its key can no longer be produced.
+  notificationTombstones: string[]
   settings: StoredSettings
   meta: { createdAt: string }
 }
@@ -169,8 +174,9 @@ export type CompassData = {
 // v2: added plaidItems[], StoredTxn.plaid*, StoredAccount.plaidAccountId,
 // settings.txnMode.
 // v3: added notifications[].
+// v4: added notificationTombstones[].
 // All additive; migrateExport backfills older stores.
-export const STORE_VERSION = 3
+export const STORE_VERSION = 4
 
 // Envelope used for the store file, `.compass` backups, and sync payloads.
 export type CompassExport = {
@@ -189,6 +195,7 @@ export function emptyData(now = new Date().toISOString()): CompassData {
     snapshots: [],
     plaidItems: [],
     notifications: [],
+    notificationTombstones: [],
     settings: {
       displayName: '',
       defaultUnit: 'btc',
@@ -234,6 +241,9 @@ export function migrateExport(raw: unknown): CompassData {
   // v3: notifications added. Left empty rather than back-generated — telling
   // someone about a budget they blew three months ago helps nobody.
   if (!Array.isArray(data.notifications)) data.notifications = []
+  // v4: tombstones added. An older store has cleared nothing, so an empty list
+  // is the correct starting state rather than a lossy default.
+  if (!Array.isArray(data.notificationTombstones)) data.notificationTombstones = []
   // Reflections were removed from the product. Stores written before that still
   // carry the array; drop it rather than reject the file, so old backups import.
   delete (data as { reflections?: unknown }).reflections

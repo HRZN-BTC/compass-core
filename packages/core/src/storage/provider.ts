@@ -159,6 +159,16 @@ export interface NotificationRepo {
   add(input: NewStoredNotification): Promise<boolean>
   markRead(id: string): Promise<void>
   markAllRead(): Promise<void>
+  /**
+   * Delete every notification, keeping their dedupe keys as tombstones.
+   *
+   * Deleting the rows outright would not stick: the generator re-evaluates
+   * every condition on the next app open, and dedupe is checked against the
+   * rows that exist — so a bank still needing re-auth, or a BTC move still
+   * inside its ISO week, would come straight back. The tombstones keep those
+   * keys suppressed, and are dropped by prune() once they can no longer match.
+   */
+  clearAll(): Promise<void>
   /** Trim to the newest `keep` rows. The feed shows 50; the store needn't grow forever. */
   prune(keep: number): Promise<void>
 }
