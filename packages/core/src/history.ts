@@ -6,7 +6,7 @@
 //     its archive is weekly before 2022, which draws bull runs as straight
 //     triangle segments and misses the real peaks.
 //   - mempool.space historical-price: HOURLY for the recent tail (last ~month),
-//     so 24H/30D have real intraday shape.
+//     so 24H/7D/30D have real intraday shape.
 // Either source alone still works (degraded) if the other is down.
 //
 // One fetch serves every timeframe; clients slice + resample locally. The web
@@ -21,10 +21,11 @@ import { coreFetch } from './transport'
 
 export type PricePoint = { t: number; usd: number } // t = ms epoch, ascending
 
-export type Timeframe = '24H' | '30D' | '1Y' | 'ALL'
+export type Timeframe = '24H' | '7D' | '30D' | '1Y' | 'ALL'
 
 export const TIMEFRAME_MS: Record<Exclude<Timeframe, 'ALL'>, number> = {
   '24H': 24 * 60 * 60 * 1000,
+  '7D': 7 * 24 * 60 * 60 * 1000,
   '30D': 30 * 24 * 60 * 60 * 1000,
   '1Y': 365 * 24 * 60 * 60 * 1000,
 }
