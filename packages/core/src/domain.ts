@@ -43,7 +43,14 @@ export function compareTxnFeed(a: TxnRow, b: TxnRow): number {
     if (!b.txnAt) return -1
     return a.txnAt < b.txnAt ? 1 : -1
   }
-  return (b.createdAt ?? '').localeCompare(a.createdAt ?? '')
+  if (a.createdAt !== b.createdAt) return (b.createdAt ?? '').localeCompare(a.createdAt ?? '')
+  // Id last, so the order is total. Rows can tie on all three keys above — a
+  // Plaid sync writes a whole batch under one created_at, and most banks send no
+  // time at all — and without a final key the list falls back to whatever order
+  // the source handed us. On the server that's physical row order, which an
+  // UPDATE changes, so recategorizing a purchase made it jump down the day.
+  // Mirrors the query's trailing `order('id', desc)`; the two have to agree.
+  return b.id.localeCompare(a.id)
 }
 
 export type AccountRow = {
