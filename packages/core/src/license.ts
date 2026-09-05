@@ -162,9 +162,32 @@ export function resolveLicenseStatus(f: LicenseFields, nowMs = Date.now()): Lice
     }
     const checkedAtSec = f.licenseCheckedAt ? Math.floor(new Date(f.licenseCheckedAt).getTime() / 1000) : 0;
     const staleReverify = nowSec - checkedAtSec > REVERIFY_AFTER_SECONDS;
+    // A server-issued trial cert (card-upfront trial on web/desktop) carries
+    // plan 'trial' and a real expiry. It reports as 'trial' rather than
+    // 'active' so the UI can show a countdown instead of implying ownership.
+    const isTrialCert = cert.plan === 'trial';
     if (nowSec <= cert.expiresAt) {
       // In period. Nudge a re-verify as the check ages so renewals refresh the cert.
+      if (isTrialCert) {
+        return {
+          state: 'trial',
+          entitled: true,
+          plan: cert.plan,
+          trialDaysLeft: Math.max(0, Math.ceil((cert.expiresAt - nowSec) / 86400)),
+          expiresAt: cert.expiresAt,
+          needsReverify: staleReverify,
+        };
+      }
       return { state: 'active', entitled: true, plan: cert.plan, trialDaysLeft: null, expiresAt: cert.expiresAt, needsReverify: staleReverify };
+    }
+    // Trial certs get NO offline grace. The grace window below is 30 days, the
+    // same length as the trial itself — applying it here would quietly turn
+    // every 30-day trial into a 60-day one for anyone who stays offline.
+    // A lapsed paid licence is someone whose card failed; a lapsed trial is
+    // someone who has not paid at all, and the two do not deserve the same
+    // benefit of the doubt.
+    if (isTrialCert) {
+      return { state: 'trial_expired', entitled: false, plan: cert.plan, trialDaysLeft: 0, expiresAt: cert.expiresAt, needsReverify: true };
     }
     // Cert expired. Keep working through the offline grace window measured from
     // the last successful server check, then lock.
