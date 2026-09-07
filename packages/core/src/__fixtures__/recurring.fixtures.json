@@ -1,0 +1,93 @@
+{
+  "_meta": {
+    "version": 1,
+    "about": "Shared recurring-schedule cases. Lives in BOTH compass-web-app (packages/core/src/__fixtures__/) and Compass-Mobile-App (src/lib/__fixtures__/). Each repo runs its own implementation against it, so whichever side drifts goes red in its own CI. Bump the version in BOTH repos when the fixture changes."
+  },
+  "nextOccurrence": [
+    { "name": "anchor itself at n=0", "anchor": "2026-09-14", "cadence": "monthly", "n": 0, "expect": "2026-09-14" },
+    { "name": "negative n clamps to the anchor", "anchor": "2026-09-14", "cadence": "monthly", "n": -3, "expect": "2026-09-14" },
+    { "name": "daily walks one day", "anchor": "2026-09-06", "cadence": "daily", "n": 1, "expect": "2026-09-07" },
+    { "name": "daily crosses a month", "anchor": "2026-09-06", "cadence": "daily", "n": 30, "expect": "2026-10-06" },
+    { "name": "weekly walks seven days", "anchor": "2026-09-07", "cadence": "weekly", "n": 1, "expect": "2026-09-14" },
+    { "name": "weekly crosses a month", "anchor": "2026-09-07", "cadence": "weekly", "n": 4, "expect": "2026-10-05" },
+    { "name": "weekly holds its weekday across the DST end", "anchor": "2026-10-26", "cadence": "weekly", "n": 1, "expect": "2026-11-02" },
+    { "name": "weekly holds its weekday two weeks past DST", "anchor": "2026-10-26", "cadence": "weekly", "n": 3, "expect": "2026-11-16" },
+    { "name": "monthly rolls into the next year", "anchor": "2026-11-14", "cadence": "monthly", "n": 2, "expect": "2027-01-14" },
+    { "name": "monthly spans multiple years", "anchor": "2026-11-14", "cadence": "monthly", "n": 14, "expect": "2028-01-14" },
+    { "name": "31st clamps into February", "anchor": "2026-01-31", "cadence": "monthly", "n": 1, "expect": "2026-02-28" },
+    { "name": "31st returns in March rather than drifting", "anchor": "2026-01-31", "cadence": "monthly", "n": 2, "expect": "2026-03-31" },
+    { "name": "31st clamps again in April", "anchor": "2026-01-31", "cadence": "monthly", "n": 3, "expect": "2026-04-30" },
+    { "name": "31st is back in May", "anchor": "2026-01-31", "cadence": "monthly", "n": 4, "expect": "2026-05-31" },
+    { "name": "31st clamps to Feb 29 in a leap year", "anchor": "2028-01-31", "cadence": "monthly", "n": 1, "expect": "2028-02-29" },
+    { "name": "30th clamps to Feb 29 in a leap year", "anchor": "2028-01-30", "cadence": "monthly", "n": 1, "expect": "2028-02-29" },
+    { "name": "Feb 29 yearly falls back in a common year", "anchor": "2028-02-29", "cadence": "yearly", "n": 1, "expect": "2029-02-28" },
+    { "name": "Feb 29 yearly returns on the next leap year", "anchor": "2028-02-29", "cadence": "yearly", "n": 4, "expect": "2032-02-29" },
+    { "name": "yearly walks one year", "anchor": "2026-02-08", "cadence": "yearly", "n": 1, "expect": "2027-02-08" },
+    { "name": "yearly walks three years", "anchor": "2026-02-08", "cadence": "yearly", "n": 3, "expect": "2029-02-08" }
+  ],
+  "dueDatesSince": [
+    {
+      "name": "every occurrence from the cursor through today",
+      "anchor": "2026-01-14", "cadence": "monthly", "fromIso": "2026-01-14", "today": "2026-04-20",
+      "expect": ["2026-01-14", "2026-02-14", "2026-03-14", "2026-04-14"]
+    },
+    {
+      "name": "an occurrence falling exactly on today counts",
+      "anchor": "2026-01-14", "cadence": "monthly", "fromIso": "2026-03-14", "today": "2026-03-14",
+      "expect": ["2026-03-14"]
+    },
+    {
+      "name": "a charge dated before the item was entered still counts",
+      "anchor": "2026-09-04", "cadence": "monthly", "fromIso": "2026-09-04", "today": "2026-09-06",
+      "expect": ["2026-09-04"]
+    },
+    {
+      "name": "a cursor later than the anchor wins",
+      "anchor": "2026-01-14", "cadence": "monthly", "fromIso": "2026-03-15", "today": "2026-05-20",
+      "expect": ["2026-04-14", "2026-05-14"]
+    },
+    {
+      "name": "a paused item owes nothing",
+      "anchor": "2026-01-14", "cadence": "monthly", "fromIso": "2026-01-14", "today": "2026-06-01",
+      "pausedAt": "2026-02-01T00:00:00.000Z",
+      "expect": []
+    },
+    {
+      "name": "nothing is owed while the next occurrence is ahead",
+      "anchor": "2026-01-14", "cadence": "monthly", "fromIso": "2026-02-14", "today": "2026-02-01",
+      "expect": []
+    },
+    {
+      "name": "weekly catch-up across a month boundary",
+      "anchor": "2026-08-17", "cadence": "weekly", "fromIso": "2026-08-17", "today": "2026-09-08",
+      "expect": ["2026-08-17", "2026-08-24", "2026-08-31", "2026-09-07"]
+    }
+  ],
+  "catchUpCap": {
+    "name": "a daily anchor years back is capped at MAX_CATCH_UP in one pass",
+    "anchor": "2020-01-01", "cadence": "daily", "fromIso": "2020-01-01", "today": "2026-09-06",
+    "expectLength": 60
+  },
+  "occurrenceAfter": [
+    { "name": "31st anchor steps into February", "anchor": "2026-01-31", "cadence": "monthly", "after": "2026-01-31", "expect": "2026-02-28" },
+    { "name": "31st anchor returns in March", "anchor": "2026-01-31", "cadence": "monthly", "after": "2026-02-28", "expect": "2026-03-31" },
+    { "name": "returns the anchor when nothing has posted", "anchor": "2026-09-07", "cadence": "weekly", "after": "2026-09-01", "expect": "2026-09-07" }
+  ],
+  "monthlyEquivalent": [
+    { "name": "monthly is unchanged", "amountUsd": 22.99, "cadence": "monthly", "expect": 22.99 },
+    { "name": "yearly spreads over twelve months", "amountUsd": 139, "cadence": "yearly", "expect": 11.5833333333 },
+    { "name": "weekly scales by average weeks per month", "amountUsd": 100, "cadence": "weekly", "expect": 434.8214285714 },
+    { "name": "daily scales by average days per month", "amountUsd": 4, "cadence": "daily", "expect": 121.75 }
+  ],
+  "cadenceLabel": [
+    { "name": "weekly names the weekday", "anchor": "2026-09-07", "cadence": "weekly", "expect": "Weekly · Mondays" },
+    { "name": "daily has no qualifier", "anchor": "2026-09-07", "cadence": "daily", "expect": "Daily" },
+    { "name": "monthly 1st", "anchor": "2026-09-01", "cadence": "monthly", "expect": "Monthly · 1st" },
+    { "name": "monthly 2nd", "anchor": "2026-09-02", "cadence": "monthly", "expect": "Monthly · 2nd" },
+    { "name": "monthly 3rd", "anchor": "2026-09-03", "cadence": "monthly", "expect": "Monthly · 3rd" },
+    { "name": "monthly 11th is not 11st", "anchor": "2026-09-11", "cadence": "monthly", "expect": "Monthly · 11th" },
+    { "name": "monthly 22nd", "anchor": "2026-09-22", "cadence": "monthly", "expect": "Monthly · 22nd" },
+    { "name": "a late anchor warns it may land on month end", "anchor": "2026-01-31", "cadence": "monthly", "expect": "Monthly · 31st (or month end)" },
+    { "name": "yearly names the date", "anchor": "2026-02-08", "cadence": "yearly", "expect": "Yearly · Feb 8" }
+  ]
+}
