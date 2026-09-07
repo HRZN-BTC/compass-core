@@ -4,7 +4,8 @@
 // lives here exactly once. A future SQLite provider replaces this wholesale.
 
 import { uuidv7 } from '../id'
-import { emptyData, migrateExport, toExport, type CompassData, type StoredPlaidItem, type StoredTxn } from './schema'
+import { emptyData, migrateExport, toExport, type CompassData, type StoredPlaidItem, type StoredRecurring, type StoredTxn } from './schema'
+import { occurrenceAfter } from '../recurring'
 
 // Upper bound on remembered cleared-notification keys. Generously above the
 // ~100 rows the feed itself keeps, because a tombstone outlives its row.
@@ -18,6 +19,7 @@ import type {
   NewStoredAccount,
   NewStoredGoal,
   NewStoredNotification,
+  NewStoredRecurring,
   NewStoredTxn,
   StorageProvider,
 } from './provider'
@@ -26,6 +28,13 @@ type Persist = () => void
 
 function nowIso(): string {
   return new Date().toISOString()
+}
+
+// Local calendar date, not UTC: "today" for a schedule means today where the
+// user is, so someone in UTC-8 doesn't see tomorrow's rent appear at 4pm.
+function todayLocalIso(): string {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
 // Merge two row arrays by id, newest updatedAt wins (LWW — the same rule the
@@ -79,6 +88,7 @@ export function buildProvider(opts: {
           icon: input.icon ?? 'cart',
           note: input.note ?? null,
           source: input.source ?? 'manual',
+          recurringId: input.recurringId ?? null,
           btcPriceUsd: input.btcPriceUsd ?? null,
           createdAt: nowIso(),
           updatedAt: nowIso(),
@@ -151,6 +161,91 @@ export function buildProvider(opts: {
         const removed = before - data.transactions.length
         if (removed) save()
         return removed
+      },
+      async postRecurring(rows) {
+        // (recurringId, date) is the idempotency key — same pair as the web
+        // schema's partial unique index.
+        const seen = new Set(
+          data.transactions
+            .filter((t) => !!t.recurringId)
+            .map((t) => `${t.recurringId}|${t.date}`),
+        )
+        let added = 0
+        for (const r of rows) {
+          const key = `${r.recurringId}|${r.date}`
+          if (seen.has(key)) continue
+          data.transactions.push({
+            id: uuidv7(),
+            date: r.date,
+            merchant: r.merchant,
+            amountUsd: r.amountUsd,
+            category: r.category,
+            icon: r.icon ?? 'cart',
+            note: r.note ?? null,
+            source: 'recurring',
+            recurringId: r.recurringId,
+            btcPriceUsd: r.btcPriceUsd ?? null,
+            createdAt: nowIso(),
+            updatedAt: nowIso(),
+          })
+          seen.add(key)
+          added++
+        }
+        if (added) save()
+        return added
+      },
+    },
+
+    recurring: {
+      async list() {
+        return [...data.recurring].sort((a, b) => (a.nextDue < b.nextDue ? -1 : a.nextDue > b.nextDue ? 1 : 0))
+      },
+      async create(input: NewStoredRecurring) {
+        const now = nowIso()
+        const r: StoredRecurring = {
+          id: uuidv7(),
+          merchant: input.merchant,
+          amountUsd: input.amountUsd,
+          category: input.category,
+          icon: input.icon ?? 'cart',
+          note: input.note ?? null,
+          cadence: input.cadence,
+          anchorDate: input.anchorDate,
+          // Default the cursor to the anchor itself: an anchor on or before
+          // today is due immediately, which is what someone entering a bill
+          // that already came out this month expects.
+          nextDue: input.nextDue ?? input.anchorDate,
+          pausedAt: null,
+          createdAt: now,
+          updatedAt: now,
+        }
+        data.recurring.push(r)
+        save()
+        return r
+      },
+      async update(id, patch) {
+        const r = data.recurring.find((x) => x.id === id)
+        if (!r) throw new Error('recurring item not found')
+        const wasPaused = !!r.pausedAt
+        Object.assign(r, patch, { updatedAt: nowIso() })
+        // Resuming skips whatever was missed rather than posting it all at
+        // once — a pause means "don't charge me for this", not "defer it".
+        if (wasPaused && patch.pausedAt === null && patch.nextDue === undefined) {
+          r.nextDue = occurrenceAfter(r, todayLocalIso())
+        }
+        save()
+      },
+      async remove(id) {
+        data.recurring = data.recurring.filter((r) => r.id !== id)
+        // Posted rows stay — that spending really happened. They just stop
+        // being badged, matching the web schema's ON DELETE SET NULL.
+        for (const t of data.transactions) {
+          if (t.recurringId === id) {
+            t.recurringId = null
+            t.updatedAt = nowIso()
+          }
+        }
+        save()
       },
     },
 
@@ -423,6 +518,7 @@ export function buildProvider(opts: {
         data = incoming
       } else {
         data.transactions = mergeRows(data.transactions, incoming.transactions)
+        data.recurring = mergeRows(data.recurring, incoming.recurring ?? [])
         data.goals = mergeRows(data.goals, incoming.goals)
         data.accounts = mergeRows(data.accounts, incoming.accounts)
         data.plaidItems = mergeRows(data.plaidItems, incoming.plaidItems)

@@ -16,6 +16,7 @@ export type TxnRow = {
   createdAt: string | null // row insertion timestamp; breaks same-day ties once txnAt has (newest added first)
   priceUsd: number | null // frozen BTC/USD price on txn_date; null = uncached (UI falls back to live)
   plaidAccountId?: string | null // which connected bank account this came from; null on manual rows
+  recurringId?: string | null // set when a recurring item posted this row; drives the ↻ badge
 }
 
 // Clock time for a transaction, for display beside its date. Null when the row

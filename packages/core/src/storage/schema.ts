@@ -22,9 +22,38 @@ export type StoredTxn = {
   // sync; presence makes the row read-only-except-recategorize in clients.
   plaidTransactionId?: string | null
   plaidAccountId?: string | null
+  // Set on rows posted by a recurring item (source === 'recurring'). Kept when
+  // the item is deleted — the spending still happened — so the badge is the
+  // only thing that goes away.
+  recurringId?: string | null
   btcPriceUsd: number | null // frozen BTC/USD on date; null = unstamped
   createdAt: string // ISO
   updatedAt: string // ISO
+}
+
+// A recurring commitment — rent, a subscription, a weekly DCA. A template, not
+// a ledger entry: the poster reads it and writes real StoredTxn rows on their
+// due dates, each carrying recurringId back to here.
+export type StoredRecurring = {
+  id: string
+  merchant: string
+  amountUsd: number
+  category: TxnCategory
+  icon: string
+  note: string | null
+  cadence: 'daily' | 'weekly' | 'monthly' | 'yearly'
+  // First occurrence, YYYY-MM-DD. Later dates are computed as anchor + N
+  // periods rather than by advancing the previous one, so a monthly item
+  // anchored on the 31st clamps into February and returns to the 31st in March
+  // instead of drifting earlier every short month.
+  anchorDate: string
+  // Cache of the next unposted occurrence; derivable from anchorDate at any time.
+  nextDue: string
+  // Set = paused. Nothing posts while non-null, and unpausing resumes from
+  // today rather than back-filling the gap.
+  pausedAt: string | null
+  createdAt: string
+  updatedAt: string
 }
 
 export type StoredGoal = {
@@ -156,6 +185,7 @@ export type StoredSettings = {
 
 export type CompassData = {
   transactions: StoredTxn[]
+  recurring: StoredRecurring[]
   goals: StoredGoal[]
   accounts: StoredAccount[]
   wallet: StoredWallet
@@ -175,8 +205,9 @@ export type CompassData = {
 // settings.txnMode.
 // v3: added notifications[].
 // v4: added notificationTombstones[].
+// v5: added recurring[], StoredTxn.recurringId.
 // All additive; migrateExport backfills older stores.
-export const STORE_VERSION = 4
+export const STORE_VERSION = 5
 
 // Envelope used for the store file, `.compass` backups, and sync payloads.
 export type CompassExport = {
@@ -189,6 +220,7 @@ export type CompassExport = {
 export function emptyData(now = new Date().toISOString()): CompassData {
   return {
     transactions: [],
+    recurring: [],
     goals: [],
     accounts: [],
     wallet: { mode: null, xpub: null, balanceBtc: 0, lastScanAt: null, updatedAt: now },
@@ -244,6 +276,9 @@ export function migrateExport(raw: unknown): CompassData {
   // v4: tombstones added. An older store has cleared nothing, so an empty list
   // is the correct starting state rather than a lossy default.
   if (!Array.isArray(data.notificationTombstones)) data.notificationTombstones = []
+  // v5: recurring added. Empty is correct for an older store — it had no
+  // recurring items, so there is nothing to post and nothing to back-date.
+  if (!Array.isArray(data.recurring)) data.recurring = []
   // Reflections were removed from the product. Stores written before that still
   // carry the array; drop it rather than reject the file, so old backups import.
   delete (data as { reflections?: unknown }).reflections

@@ -13,11 +13,13 @@ import type {
   StoredNotification,
   StoredPlaidItem,
   StoredSnapshot,
+  StoredRecurring,
   StoredTxn,
   StoredWallet,
   StoredSettings,
   TxnCategory,
 } from './schema'
+import type { Cadence } from '../recurring'
 
 export type NewStoredTxn = {
   date: string
@@ -28,6 +30,9 @@ export type NewStoredTxn = {
   note?: string | null
   source?: string
   btcPriceUsd?: number | null
+  // Set by the recurring poster. Links the row back to the commitment that
+  // produced it, and is the key `postRecurring` dedupes on.
+  recurringId?: string | null
 }
 
 // A bank-synced transaction to ingest. source is forced to 'plaid'; the
@@ -65,6 +70,16 @@ export interface TransactionRepo {
   // Bank-owned fields only (date/time/merchant/amount) for a modified Plaid row.
   updatePlaid(plaidTransactionId: string, patch: { date?: string; at?: string | null; merchant?: string; amountUsd?: number; btcPriceUsd?: number | null }): Promise<void>
   removeByPlaidTxnIds(plaidTransactionIds: string[]): Promise<number>
+  /**
+   * Insert rows posted by a recurring item, skipping any (recurringId, date)
+   * pair that already exists. Returns rows added.
+   *
+   * The skip is the whole point: a catch-up recomputes every due date from the
+   * schedule each time it runs, so without it, opening the app twice in a day
+   * would post rent twice. Mirrors the partial unique index the web schema
+   * uses for the same guarantee.
+   */
+  postRecurring(rows: Array<NewStoredTxn & { recurringId: string }>): Promise<number>
 }
 
 export type NewStoredGoal = {
@@ -91,6 +106,24 @@ export type NewStoredAccount = {
   balanceUsd: number
   isLiability: boolean
   sortOrder?: number
+}
+
+export type NewStoredRecurring = {
+  merchant: string
+  amountUsd: number
+  category: TxnCategory
+  icon?: string
+  note?: string | null
+  cadence: Cadence
+  anchorDate: string
+  nextDue?: string
+}
+
+export interface RecurringRepo {
+  list(): Promise<StoredRecurring[]>
+  create(input: NewStoredRecurring): Promise<StoredRecurring>
+  update(id: string, patch: Partial<Omit<StoredRecurring, 'id' | 'createdAt' | 'updatedAt'>>): Promise<void>
+  remove(id: string): Promise<void>
 }
 
 export interface AccountRepo {
@@ -181,6 +214,7 @@ export interface StorageProvider {
   /** Open/load the backing store. Must be called (and awaited) before any repo use. */
   init(): Promise<void>
   transactions: TransactionRepo
+  recurring: RecurringRepo
   goals: GoalRepo
   accounts: AccountRepo
   wallet: WalletRepo
