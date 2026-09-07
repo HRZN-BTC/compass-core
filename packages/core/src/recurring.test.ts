@@ -73,29 +73,33 @@ describe('nextOccurrence', () => {
 describe('dueDatesSince', () => {
   const monthly = { cadence: 'monthly' as const, anchorDate: '2026-01-14' }
 
-  it('returns every occurrence from the floor through today', () => {
+  it('returns every occurrence from the cursor through today', () => {
     expect(
-      dueDatesSince(monthly, { fromIso: '2026-01-14', notBefore: '2026-01-14', today: '2026-04-20' }),
+      dueDatesSince(monthly, { fromIso: '2026-01-14', today: '2026-04-20' }),
     ).toEqual(['2026-01-14', '2026-02-14', '2026-03-14', '2026-04-14'])
   })
 
   it('includes an occurrence that falls exactly on today', () => {
     expect(
-      dueDatesSince(monthly, { fromIso: '2026-03-14', notBefore: '2026-01-14', today: '2026-03-14' }),
+      dueDatesSince(monthly, { fromIso: '2026-03-14', today: '2026-03-14' }),
     ).toEqual(['2026-03-14'])
   })
 
-  it('excludes occurrences before the item was created', () => {
-    // Entered in March with an anchor on the 14th: only March onward is owed,
-    // even though the schedule technically began in January.
+  it('logs a charge dated a few days before the item was entered', () => {
+    // The regression this replaced: "Netflix, first charge the 4th" entered on
+    // the 6th posted nothing at all, because the floor was the creation date.
+    // The anchor is what the user typed as the first charge, so it counts.
     expect(
-      dueDatesSince(monthly, { fromIso: '2026-01-14', notBefore: '2026-03-01', today: '2026-04-20' }),
-    ).toEqual(['2026-03-14', '2026-04-14'])
+      dueDatesSince(
+        { cadence: 'monthly', anchorDate: '2026-09-04' },
+        { fromIso: '2026-09-04', today: '2026-09-06' },
+      ),
+    ).toEqual(['2026-09-04'])
   })
 
-  it('honours fromIso when it is later than the creation date', () => {
+  it('honours a cursor later than the anchor', () => {
     expect(
-      dueDatesSince(monthly, { fromIso: '2026-03-15', notBefore: '2026-01-01', today: '2026-05-20' }),
+      dueDatesSince(monthly, { fromIso: '2026-03-15', today: '2026-05-20' }),
     ).toEqual(['2026-04-14', '2026-05-14'])
   })
 
@@ -103,22 +107,22 @@ describe('dueDatesSince', () => {
     expect(
       dueDatesSince(
         { ...monthly, pausedAt: '2026-02-01T00:00:00.000Z' },
-        { fromIso: '2026-01-14', notBefore: '2026-01-14', today: '2026-06-01' },
+        { fromIso: '2026-01-14', today: '2026-06-01' },
       ),
     ).toEqual([])
   })
 
   it('returns nothing when the next occurrence is still ahead', () => {
     expect(
-      dueDatesSince(monthly, { fromIso: '2026-02-14', notBefore: '2026-01-14', today: '2026-02-01' }),
+      dueDatesSince(monthly, { fromIso: '2026-02-14', today: '2026-02-01' }),
     ).toEqual([])
   })
 
   it('caps a runaway catch-up', () => {
-    // A daily item restored from a years-old backup must not post 900 rows.
+    // A daily item anchored years back must not post 900 rows in one pass.
     const out = dueDatesSince(
       { cadence: 'daily', anchorDate: '2020-01-01' },
-      { fromIso: '2020-01-01', notBefore: '2020-01-01', today: '2026-09-06' },
+      { fromIso: '2020-01-01', today: '2026-09-06' },
     )
     expect(out).toHaveLength(MAX_CATCH_UP)
   })

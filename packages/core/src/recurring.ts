@@ -86,28 +86,32 @@ export function nextOccurrence(anchorDate: string, cadence: Cadence, n: number):
 export const MAX_CATCH_UP = 60
 
 /**
- * Every due date from `fromIso` (inclusive) through today (inclusive) that the
- * item has not already posted.
+ * Every due date from `fromIso` (inclusive) through today (inclusive).
  *
- * `notBefore` is the floor — the item's own creation date. Someone entering
- * rent today with an anchor of "the 1st" wants next month's rent tracked, not
- * eleven months of back-dated rent invented on save.
+ * The anchor is the floor, and deliberately so: the field the user fills in is
+ * labelled "first charge", so an anchor of the 4th when today is the 6th means
+ * "that charge already went out" and must be logged. An earlier version floored
+ * this at the item's creation date instead, which silently dropped exactly that
+ * case — you entered a bill dated two days ago and nothing appeared.
+ *
+ * A back-dated anchor therefore posts its whole history, capped at
+ * MAX_CATCH_UP. The modal shows the resulting count before saving, so the
+ * number of rows is never a surprise.
  *
  * Returns [] for a paused item.
  */
 export function dueDatesSince(
   schedule: RecurringSchedule,
-  opts: { fromIso: string; notBefore: string; today?: string },
+  opts: { fromIso: string; today?: string },
 ): string[] {
   if (schedule.pausedAt) return []
   const today = opts.today ?? todayIso()
-  const floor = opts.fromIso > opts.notBefore ? opts.fromIso : opts.notBefore
 
   const out: string[] = []
   for (let n = 0; n < MAX_CATCH_UP * 8; n++) {
     const iso = nextOccurrence(schedule.anchorDate, schedule.cadence, n)
     if (iso > today) break
-    if (iso >= floor) {
+    if (iso >= opts.fromIso) {
       out.push(iso)
       if (out.length >= MAX_CATCH_UP) break
     }
