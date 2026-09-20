@@ -7,6 +7,7 @@
 // server to be turned into an image — the whole point of the local-first pivot
 // is that the user's spending never leaves the device unless they share it.
 
+import { drawCompassMark } from './compassMark'
 import { fmtFiat } from './currency'
 
 const SATS_PER_BTC = 1e8
@@ -153,52 +154,6 @@ function text(
   if (opts.spacing != null) anyCtx.letterSpacing = `${opts.spacing}px`
   ctx.fillText(str, x, y)
   if (opts.spacing != null) anyCtx.letterSpacing = '0px'
-}
-
-// The true-north mark from public/icon-true-north-mark.svg, drawn on a 0-100
-// grid centred at (cx, cy) and scaled to `size`. Same construction the Bitcoin
-// tab's share card uses — the two cards should stamp an identical logo.
-function drawCompass(ctx: CanvasRenderingContext2D, cx: number, cy: number, size: number) {
-  const k = size / 100
-  const ox = cx - 50 * k
-  const oy = cy - 50 * k
-  const M = (x: number, y: number): [number, number] => [ox + x * k, oy + y * k]
-  const poly = (pts: [number, number][], fill: string) => {
-    ctx.beginPath()
-    pts.forEach(([x, y], i) => {
-      const [px, py] = M(x, y)
-      if (i) ctx.lineTo(px, py)
-      else ctx.moveTo(px, py)
-    })
-    ctx.closePath()
-    ctx.fillStyle = fill
-    ctx.fill()
-  }
-  const ring = (r: number, col: string, lw: number) => {
-    const [rcx, rcy] = M(50, 50)
-    ctx.beginPath()
-    ctx.arc(rcx, rcy, r * k, 0, Math.PI * 2)
-    ctx.strokeStyle = col
-    ctx.lineWidth = lw * k
-    ctx.stroke()
-  }
-  ring(43, '#C8C3BC', 1.4)
-  ring(31, '#D5D1CB', 1)
-  const [tx, ty] = M(50, 8.25)
-  ctx.fillStyle = '#8A847C'
-  ctx.fillRect(tx - 1.2 * k, ty - 3.25 * k, 2.4 * k, 6.5 * k)
-  poly([[50, 16], [62, 50], [50, 50]], '#F7931A')
-  poly([[50, 16], [38, 50], [50, 50]], '#D97D0C')
-  poly([[50, 84], [62, 50], [50, 50]], '#1A1714')
-  poly([[50, 84], [38, 50], [50, 50]], '#3A332D')
-  const [pcx, pcy] = M(50, 50)
-  ctx.beginPath()
-  ctx.arc(pcx, pcy, 5.2 * k, 0, Math.PI * 2)
-  ctx.fillStyle = '#FFFFFF'
-  ctx.fill()
-  ctx.strokeStyle = '#1A1714'
-  ctx.lineWidth = 1.7 * k
-  ctx.stroke()
 }
 
 function ellipsize(ctx: CanvasRenderingContext2D, str: string, max: number): string {
@@ -358,7 +313,7 @@ export async function renderShareCard(input: ShareCardInput): Promise<Blob | nul
   ctx.fillStyle = C.hair
   ctx.fillRect(PAD, y + 40, W - PAD * 2, 1)
   const fy = y + 40 + 46
-  drawCompass(ctx, PAD + 22, fy, 44)
+  drawCompassMark(ctx, PAD + 22, fy, 44)
   text(ctx, 'www.compassbtc.app', PAD + 56, fy + 11, { size: 30, weight: 600, color: C.ink, spacing: -0.4 })
 
   const tagHead = 'Your Financial Life, in '
